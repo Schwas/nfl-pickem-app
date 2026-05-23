@@ -564,3 +564,70 @@ body {
     white-space: normal;
   }
 }
+
+.week-completion-card {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 16px;
+  padding: 18px;
+  margin: 24px 0;
+  max-width: 1000px;
+}
+
+.week-completion-header h2 {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.week-completion-header p {
+  color: #9ca3af;
+  margin-top: 0;
+}
+
+.week-completion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.week-completion-button {
+  background: #1f2937;
+  color: white;
+  border: 1px solid #374151;
+  border-radius: 14px;
+  padding: 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.week-completion-button:hover {
+  border-color: #60a5fa;
+}
+
+.week-completion-button.active {
+  background: #2563eb;
+  border-color: #93c5fd;
+}
+
+.week-completion-button.complete {
+  background: #14532d;
+  border-color: #22c55e;
+}
+
+.week-completion-button span {
+  color: #cbd5e1;
+  font-size: 14px;
+}
+
+.week-completion-button strong {
+  font-size: 18px;
+}
+
+@media (max-width: 700px) {
+  .week-completion-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

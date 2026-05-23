@@ -88,6 +88,18 @@ function App() {
     };
   }
 
+  function getWeekPickProgress(week) {
+    const weekGames = schedule2026.filter((game) => game.week === week);
+    const pickedGames = weekGames.filter((game) => picks[game.id]);
+
+    return {
+      picked: pickedGames.length,
+      total: weekGames.length,
+      remaining: weekGames.length - pickedGames.length,
+      isComplete: weekGames.length > 0 && pickedGames.length === weekGames.length,
+    };
+  }
+
   function getPct(wins, losses) {
     const total = wins + losses;
 
@@ -343,6 +355,45 @@ function App() {
       <p className="picked-text">
         Pick: {selectedPick ? getTeamById(selectedPick).name : "No pick yet"}
       </p>
+    );
+  }
+
+  function renderWeekCompletionTracker() {
+    return (
+      <div className="week-completion-card">
+        <div className="week-completion-header">
+          <h2>Week Completion</h2>
+          <p>
+            Overall: {totalPickedGames} / {totalGames} games picked
+          </p>
+        </div>
+
+        <div className="week-completion-grid">
+          {availableWeeks.map((week) => {
+            const progress = getWeekPickProgress(week);
+
+            return (
+              <button
+                key={week}
+                className={
+                  selectedWeek === week
+                    ? "week-completion-button active"
+                    : progress.isComplete
+                    ? "week-completion-button complete"
+                    : "week-completion-button"
+                }
+                onClick={() => setSelectedWeek(week)}
+              >
+                <span>Week {week}</span>
+                <strong>
+                  {progress.picked}/{progress.total}
+                  {progress.isComplete ? " ✅" : ""}
+                </strong>
+              </button>
+            );
+          })}
+        </div>
+      </div>
     );
   }
 
@@ -711,6 +762,7 @@ function App() {
       {activeTab === "picks" && (
         <>
           {renderPickSummary()}
+          {renderWeekCompletionTracker()}
 
           <div className="single-column-section">{renderWeekPicks()}</div>
         </>

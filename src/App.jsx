@@ -6,6 +6,7 @@ import "./App.css";
 function App() {
   const [selectedTeamId, setSelectedTeamId] = useState("DET");
   const [selectedWeek, setSelectedWeek] = useState(1);
+  const [activeTab, setActiveTab] = useState("picks");
 
   const [picks, setPicks] = useState(() => {
     const savedPicks = localStorage.getItem("nfl-pickem-picks");
@@ -345,59 +346,8 @@ function App() {
     );
   }
 
-  function renderStandingsTable(
-    title,
-    standings,
-    rankLabel = "Rank",
-    recordType = "conference"
-  ) {
+  function renderTeamSelectorAndCard() {
     return (
-      <div className="standings-table">
-        {title && <div className="standings-title">{title}</div>}
-
-        <div className="standings-header">
-          <span>{rankLabel}</span>
-          <span>Team</span>
-          <span>Record</span>
-          <span>{recordType === "division" ? "Div" : "Conf"}</span>
-        </div>
-
-        {standings.map((team, index) => {
-          const data = getTeamStandingData(team);
-
-          return (
-            <div className="standings-row" key={team.id}>
-              <span>#{index + 1}</span>
-
-              <span
-                className="standings-team"
-                onClick={() => setSelectedTeamId(team.id)}
-              >
-                <span>{renderTeamLogo(team, "small-logo-img")}</span>
-                <span>{team.name}</span>
-              </span>
-
-              <span>
-                {data.wins}-{data.losses}
-              </span>
-
-              <span>
-                {recordType === "division"
-                  ? `${data.divisionWins}-${data.divisionLosses}`
-                  : `${data.conferenceWins}-${data.conferenceLosses}`}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return (
-    <div className="app">
-      <h1>NFL Pick'em App</h1>
-      <p>Pick winners for the 2026-27 NFL season.</p>
-
       <div className="top-section">
         <div>
           <div className="dropdown-section">
@@ -457,170 +407,326 @@ function App() {
           </p>
         </div>
       </div>
+    );
+  }
 
-      <div className="main-picks-layout">
-        <section className="picks-column">
-          <div className="week-header">
-            <h2>Week {selectedWeek} Picks</h2>
+  function renderWeekPicks() {
+    return (
+      <section className="picks-column">
+        <div className="week-header">
+          <h2>Week {selectedWeek} Picks</h2>
 
-            <select
-              value={selectedWeek}
-              onChange={(event) => setSelectedWeek(Number(event.target.value))}
-            >
-              {availableWeeks.map((week) => (
-                <option key={week} value={week}>
-                  Week {week}
-                </option>
-              ))}
-            </select>
-
-            <button className="clear-button" onClick={clearPicks}>
-              Clear Picks
-            </button>
-          </div>
-
-          <div className="pick-list">
-            {selectedWeekGames.map((game) => (
-              <div className="pick-game-card" key={game.id}>
-                <div>
-                  <strong>Week {game.week}</strong>
-
-                  <p>
-                    {game.date} - {game.time}
-                  </p>
-
-                  <p className="game-details">
-                    {game.network}
-                    {game.neutralSite && game.location
-                      ? ` • ${game.location}`
-                      : ""}
-                  </p>
-                </div>
-
-                {renderPickButtons(game)}
-
-                {renderPickedText(game)}
-              </div>
+          <select
+            value={selectedWeek}
+            onChange={(event) => setSelectedWeek(Number(event.target.value))}
+          >
+            {availableWeeks.map((week) => (
+              <option key={week} value={week}>
+                Week {week}
+              </option>
             ))}
-          </div>
-        </section>
+          </select>
 
-        <section className="picks-column">
-          <h2>{selectedTeam.name} Schedule Picks</h2>
+          <button className="clear-button" onClick={clearPicks}>
+            Clear Picks
+          </button>
+        </div>
 
-          <div className="team-schedule-pick-list">
-            {selectedTeamSchedule.map((game) => (
-              <div className="pick-game-card" key={game.id}>
-                <div>
-                  <strong>Week {game.week}</strong>
+        <div className="pick-list">
+          {selectedWeekGames.map((game) => (
+            <div className="pick-game-card" key={game.id}>
+              <div>
+                <strong>Week {game.week}</strong>
 
-                  <p>
-                    {game.date} - {game.time}
-                  </p>
+                <p>
+                  {game.date} - {game.time}
+                </p>
 
-                  <p className="game-details">
-                    {game.network}
-                    {game.neutralSite && game.location
-                      ? ` • ${game.location}`
-                      : ""}
-                  </p>
-                </div>
-
-                {renderPickButtons(game)}
-
-                {renderPickedText(game)}
+                <p className="game-details">
+                  {game.network}
+                  {game.neutralSite && game.location
+                    ? ` • ${game.location}`
+                    : ""}
+                </p>
               </div>
-            ))}
-          </div>
-        </section>
-      </div>
 
-      <h2>Projected Playoff Picture</h2>
+              {renderPickButtons(game)}
 
-      <div className="playoff-picture">
-        {renderStandingsTable("AFC Playoff Seeds", afcPlayoffPicture, "Seed")}
-        {renderStandingsTable("NFC Playoff Seeds", nfcPlayoffPicture, "Seed")}
-      </div>
-
-      <h2>Division Standings</h2>
-
-      <div className="division-standings-grid">
-        {divisionStandings.map((divisionGroup) => (
-          <div className="standings-table" key={divisionGroup.division}>
-            <div className="standings-title">{divisionGroup.division}</div>
-
-            <div className="standings-header">
-              <span>Rank</span>
-              <span>Team</span>
-              <span>Record</span>
-              <span>Div</span>
+              {renderPickedText(game)}
             </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
-            {divisionGroup.teams.map((team, index) => {
-              const data = getTeamStandingData(team);
+  function renderSelectedTeamSchedule() {
+    return (
+      <section className="picks-column">
+        <h2>{selectedTeam.name} Schedule Picks</h2>
 
-              return (
-                <div className="standings-row" key={team.id}>
-                  <span>#{index + 1}</span>
+        <div className="team-schedule-pick-list">
+          {selectedTeamSchedule.map((game) => (
+            <div className="pick-game-card" key={game.id}>
+              <div>
+                <strong>Week {game.week}</strong>
 
-                  <span
-                    className="standings-team"
-                    onClick={() => setSelectedTeamId(team.id)}
-                  >
-                    <span>{renderTeamLogo(team, "small-logo-img")}</span>
-                    <span>{team.name}</span>
-                  </span>
+                <p>
+                  {game.date} - {game.time}
+                </p>
 
-                  <span>
-                    {data.wins}-{data.losses}
-                  </span>
+                <p className="game-details">
+                  {game.network}
+                  {game.neutralSite && game.location
+                    ? ` • ${game.location}`
+                    : ""}
+                </p>
+              </div>
 
-                  <span>
-                    {data.divisionWins}-{data.divisionLosses}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+              {renderPickButtons(game)}
 
-      <h2>AFC Standings</h2>
-      {renderStandingsTable("", afcStandings)}
+              {renderPickedText(game)}
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
 
-      <h2>NFC Standings</h2>
-      {renderStandingsTable("", nfcStandings)}
+  function renderStandingsTable(
+    title,
+    standings,
+    rankLabel = "Rank",
+    recordType = "conference"
+  ) {
+    return (
+      <div className="standings-table">
+        {title && <div className="standings-title">{title}</div>}
 
-      <h2>Teams</h2>
+        <div className="standings-header">
+          <span>{rankLabel}</span>
+          <span>Team</span>
+          <span>Record</span>
+          <span>{recordType === "division" ? "Div" : "Conf"}</span>
+        </div>
 
-      <div className="team-grid">
-        {teams.map((team) => {
-          const teamProjectedRecord = getProjectedRecord(team.id);
+        {standings.map((team, index) => {
+          const data = getTeamStandingData(team);
 
           return (
-            <div
-              className="team-card"
-              key={team.id}
-              onClick={() => setSelectedTeamId(team.id)}
-            >
-              <div className="team-logo">
-                {renderTeamLogo(team, "team-logo-img")}
-              </div>
+            <div className="standings-row" key={team.id}>
+              <span>#{index + 1}</span>
 
-              <h3>{team.name}</h3>
+              <span
+                className="standings-team"
+                onClick={() => {
+                  setSelectedTeamId(team.id);
+                  setActiveTab("team");
+                }}
+              >
+                <span>{renderTeamLogo(team, "small-logo-img")}</span>
+                <span>{team.name}</span>
+              </span>
 
-              <p>
-                {team.conference} {team.division}
-              </p>
+              <span>
+                {data.wins}-{data.losses}
+              </span>
 
-              <p>
-                Projected Record: {teamProjectedRecord.wins}-
-                {teamProjectedRecord.losses}
-              </p>
+              <span>
+                {recordType === "division"
+                  ? `${data.divisionWins}-${data.divisionLosses}`
+                  : `${data.conferenceWins}-${data.conferenceLosses}`}
+              </span>
             </div>
           );
         })}
       </div>
+    );
+  }
+
+  function renderTeamsGrid() {
+    return (
+      <>
+        <h2>Teams</h2>
+
+        <div className="team-grid">
+          {teams.map((team) => {
+            const teamProjectedRecord = getProjectedRecord(team.id);
+
+            return (
+              <div
+                className="team-card"
+                key={team.id}
+                onClick={() => {
+                  setSelectedTeamId(team.id);
+                  setActiveTab("team");
+                }}
+              >
+                <div className="team-logo">
+                  {renderTeamLogo(team, "team-logo-img")}
+                </div>
+
+                <h3>{team.name}</h3>
+
+                <p>
+                  {team.conference} {team.division}
+                </p>
+
+                <p>
+                  Projected Record: {teamProjectedRecord.wins}-
+                  {teamProjectedRecord.losses}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="app">
+      <h1>NFL Pick'em App</h1>
+      <p>Pick winners for the 2026-27 NFL season.</p>
+
+      <div className="tab-nav">
+        <button
+          className={activeTab === "picks" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("picks")}
+        >
+          Picks
+        </button>
+
+        <button
+          className={activeTab === "team" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("team")}
+        >
+          Team View
+        </button>
+
+        <button
+          className={
+            activeTab === "standings" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("standings")}
+        >
+          Standings
+        </button>
+
+        <button
+          className={
+            activeTab === "playoffs" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("playoffs")}
+        >
+          Playoffs
+        </button>
+
+        <button
+          className={activeTab === "teams" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("teams")}
+        >
+          Teams
+        </button>
+      </div>
+
+      {activeTab === "picks" && (
+        <>
+          {renderTeamSelectorAndCard()}
+
+          <div className="main-picks-layout">
+            {renderWeekPicks()}
+            {renderSelectedTeamSchedule()}
+          </div>
+        </>
+      )}
+
+      {activeTab === "team" && (
+        <>
+          {renderTeamSelectorAndCard()}
+
+          <div className="single-column-section">
+            {renderSelectedTeamSchedule()}
+          </div>
+        </>
+      )}
+
+      {activeTab === "standings" && (
+        <>
+          <h2>Division Standings</h2>
+
+          <div className="division-standings-grid">
+            {divisionStandings.map((divisionGroup) => (
+              <div className="standings-table" key={divisionGroup.division}>
+                <div className="standings-title">{divisionGroup.division}</div>
+
+                <div className="standings-header">
+                  <span>Rank</span>
+                  <span>Team</span>
+                  <span>Record</span>
+                  <span>Div</span>
+                </div>
+
+                {divisionGroup.teams.map((team, index) => {
+                  const data = getTeamStandingData(team);
+
+                  return (
+                    <div className="standings-row" key={team.id}>
+                      <span>#{index + 1}</span>
+
+                      <span
+                        className="standings-team"
+                        onClick={() => {
+                          setSelectedTeamId(team.id);
+                          setActiveTab("team");
+                        }}
+                      >
+                        <span>{renderTeamLogo(team, "small-logo-img")}</span>
+                        <span>{team.name}</span>
+                      </span>
+
+                      <span>
+                        {data.wins}-{data.losses}
+                      </span>
+
+                      <span>
+                        {data.divisionWins}-{data.divisionLosses}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
+          <h2>AFC Standings</h2>
+          {renderStandingsTable("", afcStandings)}
+
+          <h2>NFC Standings</h2>
+          {renderStandingsTable("", nfcStandings)}
+        </>
+      )}
+
+      {activeTab === "playoffs" && (
+        <>
+          <h2>Projected Playoff Picture</h2>
+
+          <div className="playoff-picture">
+            {renderStandingsTable(
+              "AFC Playoff Seeds",
+              afcPlayoffPicture,
+              "Seed"
+            )}
+            {renderStandingsTable(
+              "NFC Playoff Seeds",
+              nfcPlayoffPicture,
+              "Seed"
+            )}
+          </div>
+        </>
+      )}
+
+      {activeTab === "teams" && renderTeamsGrid()}
     </div>
   );
 }

@@ -6,7 +6,8 @@ import "./App.css";
 function App() {
   const [selectedTeamId, setSelectedTeamId] = useState("DET");
   const [selectedWeek, setSelectedWeek] = useState(1);
-  const [activeTab, setActiveTab] = useState("picks");
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [myPicksWeekFilter, setMyPicksWeekFilter] = useState("all");
 
   const [picks, setPicks] = useState(() => {
     const savedPicks = localStorage.getItem("nfl-pickem-picks");
@@ -44,11 +45,16 @@ function App() {
     (game) => picks[game.id]
   ).length;
 
+  const completedWeeks = availableWeeks.filter(
+    (week) => getWeekPickProgress(week).isComplete
+  ).length;
+
   const divisionStandings = getDivisionStandings();
   const afcStandings = getConferenceStandings("AFC");
   const nfcStandings = getConferenceStandings("NFC");
   const afcPlayoffPicture = getPlayoffPicture("AFC");
   const nfcPlayoffPicture = getPlayoffPicture("NFC");
+  const overallStandings = getOverallStandings();
 
   function getTeamById(teamId) {
     return teams.find((team) => team.id === teamId);
@@ -62,7 +68,33 @@ function App() {
   }
 
   function clearPicks() {
+    const confirmClear = window.confirm(
+      "Are you sure you want to clear every pick?"
+    );
+
+    if (!confirmClear) {
+      return;
+    }
+
     setPicks({});
+  }
+
+  function clearSelectedWeekPicks() {
+    const confirmClear = window.confirm(
+      `Are you sure you want to clear all Week ${selectedWeek} picks?`
+    );
+
+    if (!confirmClear) {
+      return;
+    }
+
+    const updatedPicks = { ...picks };
+
+    selectedWeekGames.forEach((game) => {
+      delete updatedPicks[game.id];
+    });
+
+    setPicks(updatedPicks);
   }
 
   function getProjectedRecord(teamId) {
@@ -92,11 +124,23 @@ function App() {
     const weekGames = schedule2026.filter((game) => game.week === week);
     const pickedGames = weekGames.filter((game) => picks[game.id]);
 
+    const isComplete =
+      weekGames.length > 0 && pickedGames.length === weekGames.length;
+
+    let status = "Not Started";
+
+    if (isComplete) {
+      status = "Complete";
+    } else if (pickedGames.length > 0) {
+      status = "In Progress";
+    }
+
     return {
       picked: pickedGames.length,
       total: weekGames.length,
       remaining: weekGames.length - pickedGames.length,
-      isComplete: weekGames.length > 0 && pickedGames.length === weekGames.length,
+      isComplete,
+      status,
     };
   }
 
@@ -288,6 +332,10 @@ function App() {
     return [...divisionWinners, ...wildCardTeams];
   }
 
+  function getOverallStandings() {
+    return [...teams].sort(compareTeams);
+  }
+
   function getTeamStandingData(team) {
     const stats = getTeamStats(team.id);
     const progress = getTeamPickProgress(team.id);
@@ -358,6 +406,112 @@ function App() {
     );
   }
 
+  function renderDashboard() {
+    const afcOneSeed = afcPlayoffPicture[0];
+    const nfcOneSeed = nfcPlayoffPicture[0];
+    const topProjectedTeams = overallStandings.slice(0, 5);
+
+    return (
+      <>
+        <div className="dashboard-hero">
+          <div>
+            <h2>Season Dashboard</h2>
+            <p>
+              Track your picks, projected records, playoff seeds, and contest
+              readiness in one place.
+            </p>
+          </div>
+
+          <button className="primary-action-button" onClick={() => setActiveTab("picks")}>
+            Make Picks
+          </button>
+        </div>
+
+        <div className="dashboard-grid">
+          <div className="dashboard-card">
+            <span>Total Picks</span>
+            <strong>
+              {totalPickedGames}/{totalGames}
+            </strong>
+            <p>{totalGames - totalPickedGames} games remaining</p>
+          </div>
+
+          <div className="dashboard-card">
+            <span>Completed Weeks</span>
+            <strong>
+              {completedWeeks}/{availableWeeks.length}
+            </strong>
+            <p>{availableWeeks.length - completedWeeks} weeks still open</p>
+          </div>
+
+          <div className="dashboard-card">
+            <span>Selected Team</span>
+            <strong>{selectedTeam.name}</strong>
+            <p>
+              Projected: {selectedTeamProjectedRecord.wins}-
+              {selectedTeamProjectedRecord.losses}
+            </p>
+          </div>
+
+          <div className="dashboard-card">
+            <span>Current 1 Seeds</span>
+            <strong>
+              {afcOneSeed ? afcOneSeed.name : "AFC TBD"} /{" "}
+              {nfcOneSeed ? nfcOneSeed.name : "NFC TBD"}
+            </strong>
+            <p>Based on your projected picks</p>
+          </div>
+        </div>
+
+        <div className="dashboard-two-column">
+          <div className="dashboard-panel">
+            <h2>Top Projected Teams</h2>
+
+            {topProjectedTeams.map((team, index) => {
+              const data = getTeamStandingData(team);
+
+              return (
+                <button
+                  className="dashboard-team-row"
+                  key={team.id}
+                  onClick={() => {
+                    setSelectedTeamId(team.id);
+                    setActiveTab("team");
+                  }}
+                >
+                  <span>#{index + 1}</span>
+                  <span>{renderTeamLogo(team, "small-logo-img")}</span>
+                  <span>{team.name}</span>
+                  <strong>
+                    {data.wins}-{data.losses}
+                  </strong>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="dashboard-panel contest-preview-panel">
+            <h2>Contest Mode Preview</h2>
+
+            <p>
+              This app is still single-user right now, but the structure is
+              getting ready for contests.
+            </p>
+
+            <div className="contest-preview-list">
+              <span>Player: You</span>
+              <span>Contest: 2026 NFL Pick’em</span>
+              <span>Scoring: 1 point per correct pick</span>
+              <span>Coming soon: login, groups, leaderboards</span>
+            </div>
+          </div>
+        </div>
+
+        {renderWeekCompletionTracker()}
+      </>
+    );
+  }
+
   function renderWeekCompletionTracker() {
     return (
       <div className="week-completion-card">
@@ -380,15 +534,23 @@ function App() {
                     ? "week-completion-button active"
                     : progress.isComplete
                     ? "week-completion-button complete"
+                    : progress.picked > 0
+                    ? "week-completion-button in-progress"
                     : "week-completion-button"
                 }
-                onClick={() => setSelectedWeek(week)}
+                onClick={() => {
+                  setSelectedWeek(week);
+                  setActiveTab("picks");
+                }}
               >
                 <span>Week {week}</span>
+
                 <strong>
                   {progress.picked}/{progress.total}
                   {progress.isComplete ? " ✅" : ""}
                 </strong>
+
+                <small>{progress.status}</small>
               </button>
             );
           })}
@@ -409,54 +571,87 @@ function App() {
       );
     }
 
-    const weeksWithPicks = [...new Set(pickedGames.map((game) => game.week))];
+    const filteredPickedGames =
+      myPicksWeekFilter === "all"
+        ? pickedGames
+        : pickedGames.filter((game) => game.week === Number(myPicksWeekFilter));
+
+    const weeksWithPicks = [
+      ...new Set(filteredPickedGames.map((game) => game.week)),
+    ];
 
     return (
-      <div className="my-picks-list">
-        {weeksWithPicks.map((week) => {
-          const gamesForWeek = pickedGames.filter(
-            (game) => game.week === week
-          );
+      <>
+        <div className="my-picks-controls">
+          <label htmlFor="my-picks-week-filter">Filter by week:</label>
 
-          return (
-            <div className="my-picks-week" key={week}>
-              <h2>Week {week}</h2>
+          <select
+            id="my-picks-week-filter"
+            value={myPicksWeekFilter}
+            onChange={(event) => setMyPicksWeekFilter(event.target.value)}
+          >
+            <option value="all">All Weeks</option>
 
-              {gamesForWeek.map((game) => {
-                const awayTeam = getTeamById(game.awayTeam);
-                const homeTeam = getTeamById(game.homeTeam);
-                const pickedTeam = getTeamById(picks[game.id]);
+            {availableWeeks.map((week) => (
+              <option key={week} value={week}>
+                Week {week}
+              </option>
+            ))}
+          </select>
+        </div>
 
-                return (
-                  <div className="my-pick-row" key={game.id}>
-                    <div>
-                      <strong>
-                        {renderTeamLogo(awayTeam, "small-logo-img")}{" "}
-                        {awayTeam.name} {game.neutralSite ? "vs" : "@"}{" "}
-                        {renderTeamLogo(homeTeam, "small-logo-img")}{" "}
-                        {homeTeam.name}
-                      </strong>
+        {filteredPickedGames.length === 0 ? (
+          <div className="summary-card">
+            <p>No picks found for this week yet.</p>
+          </div>
+        ) : (
+          <div className="my-picks-list">
+            {weeksWithPicks.map((week) => {
+              const gamesForWeek = filteredPickedGames.filter(
+                (game) => game.week === week
+              );
 
-                      <p>
-                        Week {game.week} • {game.date} • {game.time}
-                        {game.network ? ` • ${game.network}` : ""}
-                        {game.neutralSite && game.location
-                          ? ` • ${game.location}`
-                          : ""}
-                      </p>
-                    </div>
+              return (
+                <div className="my-picks-week" key={week}>
+                  <h2>Week {week}</h2>
 
-                    <div className="my-pick-winner">
-                      Pick: {renderTeamLogo(pickedTeam, "small-logo-img")}{" "}
-                      {pickedTeam.name}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
-      </div>
+                  {gamesForWeek.map((game) => {
+                    const awayTeam = getTeamById(game.awayTeam);
+                    const homeTeam = getTeamById(game.homeTeam);
+                    const pickedTeam = getTeamById(picks[game.id]);
+
+                    return (
+                      <div className="my-pick-row" key={game.id}>
+                        <div>
+                          <strong>
+                            {renderTeamLogo(awayTeam, "small-logo-img")}{" "}
+                            {awayTeam.name} {game.neutralSite ? "vs" : "@"}{" "}
+                            {renderTeamLogo(homeTeam, "small-logo-img")}{" "}
+                            {homeTeam.name}
+                          </strong>
+
+                          <p>
+                            Week {game.week} • {game.date} • {game.time}
+                            {game.network ? ` • ${game.network}` : ""}
+                            {game.neutralSite && game.location
+                              ? ` • ${game.location}`
+                              : ""}
+                          </p>
+                        </div>
+
+                        <div className="my-pick-winner">
+                          Pick: {renderTeamLogo(pickedTeam, "small-logo-img")}{" "}
+                          {pickedTeam.name}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
     );
   }
 
@@ -547,9 +742,15 @@ function App() {
             ))}
           </select>
 
-          <button className="clear-button" onClick={clearPicks}>
-            Clear Picks
-          </button>
+          <div className="week-action-buttons">
+            <button className="clear-button" onClick={clearSelectedWeekPicks}>
+              Clear Week {selectedWeek}
+            </button>
+
+            <button className="clear-button danger" onClick={clearPicks}>
+              Clear All Picks
+            </button>
+          </div>
         </div>
 
         <div className="pick-list">
@@ -711,6 +912,15 @@ function App() {
 
       <div className="tab-nav">
         <button
+          className={
+            activeTab === "dashboard" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("dashboard")}
+        >
+          Dashboard
+        </button>
+
+        <button
           className={activeTab === "picks" ? "tab-button active" : "tab-button"}
           onClick={() => setActiveTab("picks")}
         >
@@ -758,6 +968,8 @@ function App() {
           Teams
         </button>
       </div>
+
+      {activeTab === "dashboard" && renderDashboard()}
 
       {activeTab === "picks" && (
         <>

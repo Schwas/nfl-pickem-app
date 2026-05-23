@@ -346,6 +346,69 @@ function App() {
     );
   }
 
+  function renderMyPicks() {
+    const pickedGames = schedule2026.filter((game) => picks[game.id]);
+
+    if (pickedGames.length === 0) {
+      return (
+        <div className="summary-card">
+          <h2>My Picks</h2>
+          <p>You have not made any picks yet.</p>
+        </div>
+      );
+    }
+
+    const weeksWithPicks = [...new Set(pickedGames.map((game) => game.week))];
+
+    return (
+      <div className="my-picks-list">
+        {weeksWithPicks.map((week) => {
+          const gamesForWeek = pickedGames.filter(
+            (game) => game.week === week
+          );
+
+          return (
+            <div className="my-picks-week" key={week}>
+              <h2>Week {week}</h2>
+
+              {gamesForWeek.map((game) => {
+                const awayTeam = getTeamById(game.awayTeam);
+                const homeTeam = getTeamById(game.homeTeam);
+                const pickedTeam = getTeamById(picks[game.id]);
+
+                return (
+                  <div className="my-pick-row" key={game.id}>
+                    <div>
+                      <strong>
+                        {renderTeamLogo(awayTeam, "small-logo-img")}{" "}
+                        {awayTeam.name} {game.neutralSite ? "vs" : "@"}{" "}
+                        {renderTeamLogo(homeTeam, "small-logo-img")}{" "}
+                        {homeTeam.name}
+                      </strong>
+
+                      <p>
+                        Week {game.week} • {game.date} • {game.time}
+                        {game.network ? ` • ${game.network}` : ""}
+                        {game.neutralSite && game.location
+                          ? ` • ${game.location}`
+                          : ""}
+                      </p>
+                    </div>
+
+                    <div className="my-pick-winner">
+                      Pick: {renderTeamLogo(pickedTeam, "small-logo-img")}{" "}
+                      {pickedTeam.name}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
   function renderPickSummary() {
     return (
       <div className="summary-card">
@@ -604,6 +667,15 @@ function App() {
         </button>
 
         <button
+          className={
+            activeTab === "myPicks" ? "tab-button active" : "tab-button"
+          }
+          onClick={() => setActiveTab("myPicks")}
+        >
+          My Picks
+        </button>
+
+        <button
           className={activeTab === "team" ? "tab-button active" : "tab-button"}
           onClick={() => setActiveTab("team")}
         >
@@ -641,6 +713,13 @@ function App() {
           {renderPickSummary()}
 
           <div className="single-column-section">{renderWeekPicks()}</div>
+        </>
+      )}
+
+      {activeTab === "myPicks" && (
+        <>
+          <h2>My Picks</h2>
+          {renderMyPicks()}
         </>
       )}
 

@@ -512,3 +512,55 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+.my-picks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-width: 1000px;
+}
+
+.my-picks-week {
+  background: #111827;
+  border: 1px solid #374151;
+  border-radius: 16px;
+  padding: 18px;
+}
+
+.my-picks-week h2 {
+  margin-top: 0;
+}
+
+.my-pick-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: center;
+  border-top: 1px solid #374151;
+  padding: 14px 0;
+}
+
+.my-pick-row p {
+  color: #9ca3af;
+  margin: 6px 0 0;
+}
+
+.my-pick-winner {
+  background: #1f2937;
+  border: 1px solid #374151;
+  border-radius: 999px;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .my-pick-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .my-pick-winner {
+    text-align: center;
+    white-space: normal;
+  }
+}

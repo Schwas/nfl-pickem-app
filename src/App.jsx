@@ -346,6 +346,23 @@ function App() {
     );
   }
 
+  function renderPickSummary() {
+    return (
+      <div className="summary-card">
+        <h2>Pick Summary</h2>
+
+        <p>
+          Total Games Picked: {totalPickedGames} / {totalGames}
+        </p>
+
+        <p>
+          Week {selectedWeek} Picks: {selectedWeekPickedGames} /{" "}
+          {selectedWeekGames.length}
+        </p>
+      </div>
+    );
+  }
+
   function renderTeamSelectorAndCard() {
     return (
       <div className="top-section">
@@ -394,18 +411,7 @@ function App() {
           </div>
         </div>
 
-        <div className="summary-card">
-          <h2>Pick Summary</h2>
-
-          <p>
-            Total Games Picked: {totalPickedGames} / {totalGames}
-          </p>
-
-          <p>
-            Week {selectedWeek} Picks: {selectedWeekPickedGames} /{" "}
-            {selectedWeekGames.length}
-          </p>
-        </div>
+        {renderPickSummary()}
       </div>
     );
   }
@@ -632,12 +638,9 @@ function App() {
 
       {activeTab === "picks" && (
         <>
-          {renderTeamSelectorAndCard()}
+          {renderPickSummary()}
 
-          <div className="main-picks-layout">
-            {renderWeekPicks()}
-            {renderSelectedTeamSchedule()}
-          </div>
+          <div className="single-column-section">{renderWeekPicks()}</div>
         </>
       )}
 

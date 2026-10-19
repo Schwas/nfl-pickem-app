@@ -3,11 +3,67 @@ import { teams } from "./data/teams";
 import { schedule2026 } from "./data/schedule2026";
 import "./App.css";
 
+// Real game results always override simulated outcomes in season standings.
+// ESPN's scoreboard is unofficial; the Netlify Function validates its response.
+const SCORE_ENDPOINT = "/.netlify/functions/nfl-scores";
+const SCORE_REFRESH_MS = 120000;
+const SCORES_CACHE_KEY = "nfl-pickem-score-cache-2026";
+const TIE_PICK = "TIE";
+
+// These are illustrative simulator weights, not real betting odds or live ratings.
+const SIM_STRENGTH = {
+  ARI: 71, ATL: 79, BAL: 89, BUF: 92, CAR: 70, CHI: 80,
+  CIN: 85, CLE: 69, DAL: 79, DEN: 85, DET: 89, GB: 85,
+  HOU: 83, IND: 78, JAX: 77, KC: 90, LAC: 84, LAR: 87,
+  LV: 70, MIA: 76, MIN: 82, NE: 77, NO: 70, NYG: 71,
+  NYJ: 72, PHI: 90, PIT: 82, SEA: 85, SF: 84, TB: 81,
+  TEN: 69, WAS: 81,
+};
+
+function easternDateKey() {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const read = (kind) => parts.find((part) => part.type === kind)?.value;
+  return `${read("year")}-${read("month")}-${read("day")}`;
+}
+
+function currentScheduleWeek() {
+  const today = easternDateKey();
+  const startedWeeks = schedule2026
+    .filter((game) => /^\d{4}-\d{2}-\d{2}$/.test(game.date) && game.date <= today)
+    .map((game) => Number(game.week));
+  return Math.max(1, ...startedWeeks);
+}
+
+function scoreboardKey(game) {
+  return `${game.week}:${game.awayTeam}:${game.homeTeam}`;
+}
+
+function safeScoreCache() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SCORES_CACHE_KEY) || "null");
+    if (saved && typeof saved.games === "object" && saved.games) return saved;
+  } catch {
+    // Offline or invalid cache should never prevent the app from loading.
+  }
+  return { games: {}, updatedAt: null };
+}
+
+function recordText(data) {
+  return `${data.wins}-${data.losses}-${data.ties}`;
+}
+
 function App() {
   const [selectedTeamId, setSelectedTeamId] = useState("DET");
   const [selectedWeek, setSelectedWeek] = useState(1);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [myPicksWeekFilter, setMyPicksWeekFilter] = useState("all");
+
+  const [scoreCache, setScoreCache] = useState(safeScoreCache);
+  const [scoreError, setScoreError] = useState("");
+  const [scoreLoading, setScoreLoading] = useState(false);
+  const [scoreSourceReady, setScoreSourceReady] = useState(false);
 
   const [picks, setPicks] = useState(() => {
     const savedPicks = localStorage.getItem("nfl-pickem-picks");
@@ -22,6 +78,83 @@ function App() {
   useEffect(() => {
     localStorage.setItem("nfl-pickem-picks", JSON.stringify(picks));
   }, [picks]);
+
+  useEffect(() => {
+    // One initial load fills previous weeks; periodic checks fetch only this/last week.
+    let disposed = false;
+    let liveGamesActive = false;
+    let lastBackgroundCheck = Date.now();
+    const controller = new AbortController();
+
+    async function loadScores(fullSeasonHistory = false) {
+      if (disposed || document.visibilityState === "hidden") return;
+      const week = currentScheduleWeek();
+      const parameters = fullSeasonHistory
+        ? `throughWeek=${week}`
+        : `weeks=${[Math.max(1, week - 1), week].join(",")}`;
+
+      setScoreLoading(true);
+      try {
+        const response = await fetch(`${SCORE_ENDPOINT}?${parameters}`, {
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Score service returned ${response.status}`);
+        const payload = await response.json();
+        if (!Array.isArray(payload.games) || !Array.isArray(payload.weeksLoaded)) {
+          throw new Error("Unexpected scoreboard response");
+        }
+        if (disposed) return;
+
+        setScoreCache((previous) => {
+          const updated = { ...previous.games };
+          const received = new Set(payload.weeksLoaded);
+          for (const key of Object.keys(updated)) {
+            if (received.has(Number(key.split(":")[0]))) delete updated[key];
+          }
+          for (const game of payload.games) {
+            const validState = ["pre", "in", "post"].includes(game.state);
+            if (!validState || !Number.isInteger(game.week) || !game.awayTeam || !game.homeTeam) continue;
+            updated[scoreboardKey(game)] = game;
+          }
+          const next = { games: updated, updatedAt: new Date().toISOString() };
+          try { localStorage.setItem(SCORES_CACHE_KEY, JSON.stringify(next)); } catch { /* optional */ }
+          return next;
+        });
+        liveGamesActive = payload.games.some((game) => game.state === "in");
+        setScoreSourceReady(true);
+        setScoreError(payload.weeksFailed?.length
+          ? `Could not load Week ${payload.weeksFailed.join(", ")} scores.`
+          : "");
+      } catch (error) {
+        if (!disposed && error.name !== "AbortError") {
+          setScoreError("Live scores are unavailable right now. Showing last cached results if present.");
+        }
+      } finally {
+        if (!disposed) setScoreLoading(false);
+      }
+    }
+
+    loadScores(true);
+    const interval = window.setInterval(() => {
+      // Save function calls when no game is live: 10 minutes otherwise 2 minutes.
+      if (liveGamesActive || Date.now() - lastBackgroundCheck >= 600000) {
+        lastBackgroundCheck = Date.now();
+        loadScores(false);
+      }
+    }, SCORE_REFRESH_MS);
+    const onVisible = () => { if (document.visibilityState === "visible") loadScores(true); };
+    document.addEventListener("visibilitychange", onVisible);
+    // The button requests a refresh without reloading the page.
+    const onRefresh = () => loadScores(true);
+    window.addEventListener("nfl-refresh-scores", onRefresh);
+    return () => {
+      disposed = true;
+      controller.abort();
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("nfl-refresh-scores", onRefresh);
+    };
+  }, []);
 
   const selectedTeam = getTeamById(selectedTeamId);
   const selectedTeamProjectedRecord = getProjectedRecord(selectedTeamId);
@@ -39,7 +172,13 @@ function App() {
   const availableWeeks = [...new Set(schedule2026.map((game) => game.week))];
 
   const totalGames = schedule2026.length;
-  const totalPickedGames = Object.keys(picks).length;
+  const totalPickedGames = schedule2026.filter((game) => Boolean(picks[game.id])).length;
+  const scoreCounts = { correct: 0, wrong: 0, push: 0, pending: 0 };
+  schedule2026.forEach((game) => {
+    if (!picks[game.id]) return;
+    const outcome = getPickEvaluation(game);
+    if (outcome in scoreCounts) scoreCounts[outcome] += 1;
+  });
 
   const selectedWeekPickedGames = selectedWeekGames.filter(
     (game) => picks[game.id]
@@ -60,28 +199,102 @@ function App() {
     return teams.find((team) => team.id === teamId);
   }
 
-  function handlePick(gameId, teamId) {
-    setPicks({
-      ...picks,
-      [gameId]: teamId,
+  function getLiveGame(game) {
+    return scoreCache.games[scoreboardKey(game)];
+  }
+
+  function getActualWinner(game) {
+    const score = getLiveGame(game);
+    if (!score || score.state !== "post" ||
+        !Number.isFinite(score.awayScore) || !Number.isFinite(score.homeScore)) return null;
+    if (score.awayScore === score.homeScore) return TIE_PICK;
+    return score.awayScore > score.homeScore ? game.awayTeam : game.homeTeam;
+  }
+
+  function getEffectiveWinner(game) {
+    return getActualWinner(game) || picks[game.id] || null;
+  }
+
+  function getPickEvaluation(game) {
+    const pick = picks[game.id];
+    if (!pick) return null;
+    const actual = getActualWinner(game);
+    if (!actual) return "pending";
+    if (actual === TIE_PICK && pick !== TIE_PICK) return "push";
+    return pick === actual ? "correct" : "wrong";
+  }
+
+  function isGameStarted(game) {
+    const score = getLiveGame(game);
+    if (score) {
+      if (score.state === "in" || score.state === "post") return true;
+      if (score.kickoff && Number.isFinite(new Date(score.kickoff).getTime())) {
+        return new Date(score.kickoff).getTime() <= Date.now();
+      }
+      return false;
+    }
+    // When the feed is down, don't simulate earlier calendar dates as future games.
+    return /^\d{4}-\d{2}-\d{2}$/.test(game.date) && game.date < easternDateKey();
+  }
+
+  function simulateGame(game) {
+    const away = SIM_STRENGTH[game.awayTeam] ?? 78;
+    const home = SIM_STRENGTH[game.homeTeam] ?? 78;
+    // Approximate 3-point home advantage, unless this is a neutral-site game.
+    const difference = home + (game.neutralSite ? 0 : 3) - away;
+    const homeChance = Math.min(0.83, Math.max(0.17, 0.5 + difference * 0.015));
+    return Math.random() < homeChance ? game.homeTeam : game.awayTeam;
+  }
+
+  function simulateRemaining(scope) {
+    const eligible = schedule2026.filter((game) =>
+      !picks[game.id] && !isGameStarted(game) &&
+      (scope === "season" || game.week === selectedWeek)
+    );
+    if (!eligible.length) {
+      window.alert("No eligible unpicked games remain. Live and completed games are skipped.");
+      return;
+    }
+    const label = scope === "season" ? "the rest of the season" : `Week ${selectedWeek}`;
+    if (!window.confirm(`Simulate ${eligible.length} unpicked future games for ${label}? Existing picks will be kept.`)) return;
+    setPicks((old) => {
+      const next = { ...old };
+      eligible.forEach((game) => { if (!next[game.id]) next[game.id] = simulateGame(game); });
+      return next;
     });
+  }
+
+  function refreshScores() {
+    window.dispatchEvent(new Event("nfl-refresh-scores"));
+  }
+
+  function handlePick(gameId, teamId) {
+    if (isGameStarted(schedule2026.find((game) => game.id === gameId))) return;
+    setPicks((old) => ({ ...old, [gameId]: teamId }));
   }
 
   function clearPicks() {
     const confirmClear = window.confirm(
-      "Are you sure you want to clear every pick?"
+      "Clear all picks for games that have NOT started? Locked picks will be preserved."
     );
 
     if (!confirmClear) {
       return;
     }
 
-    setPicks({});
+    setPicks((old) => {
+      const next = { ...old };
+      // Preserve locked picks so users cannot erase recorded contest results.
+      schedule2026.forEach((game) => {
+        if (!isGameStarted(game)) delete next[game.id];
+      });
+      return next;
+    });
   }
 
   function clearSelectedWeekPicks() {
     const confirmClear = window.confirm(
-      `Are you sure you want to clear all Week ${selectedWeek} picks?`
+      `Clear unstarted Week ${selectedWeek} picks? Locked picks will be preserved.`
     );
 
     if (!confirmClear) {
@@ -91,7 +304,7 @@ function App() {
     const updatedPicks = { ...picks };
 
     selectedWeekGames.forEach((game) => {
-      delete updatedPicks[game.id];
+      if (!isGameStarted(game)) delete updatedPicks[game.id];
     });
 
     setPicks(updatedPicks);
@@ -99,14 +312,10 @@ function App() {
 
   function getProjectedRecord(teamId) {
     const stats = getTeamStats(teamId);
-
-    return {
-      wins: stats.wins,
-      losses: stats.losses,
-    };
+    return { wins: stats.wins, losses: stats.losses, ties: stats.ties };
   }
 
-  function getTeamPickProgress(teamId) {
+    function getTeamPickProgress(teamId) {
     const teamGames = schedule2026.filter(
       (game) => game.homeTeam === teamId || game.awayTeam === teamId
     );
@@ -144,90 +353,55 @@ function App() {
     };
   }
 
-  function getPct(wins, losses) {
-    const total = wins + losses;
-
-    if (total === 0) {
-      return 0;
-    }
-
-    return wins / total;
+  function getPct(wins, losses, ties = 0) {
+    const total = wins + losses + ties;
+    return total ? (wins + 0.5 * ties) / total : 0;
   }
 
   function getTeamStats(teamId) {
     const team = getTeamById(teamId);
-
-    let wins = 0;
-    let losses = 0;
-    let divisionWins = 0;
-    let divisionLosses = 0;
-    let conferenceWins = 0;
-    let conferenceLosses = 0;
-
+    let wins = 0, losses = 0, ties = 0;
+    let divisionWins = 0, divisionLosses = 0, divisionTies = 0;
+    let conferenceWins = 0, conferenceLosses = 0, conferenceTies = 0;
     schedule2026.forEach((game) => {
-      const selectedPick = picks[game.id];
-
-      if (!selectedPick) {
-        return;
-      }
-
-      const isTeamInGame = game.homeTeam === teamId || game.awayTeam === teamId;
-
-      if (!isTeamInGame) {
-        return;
-      }
-
-      const opponentId =
-        game.homeTeam === teamId ? game.awayTeam : game.homeTeam;
+      if (game.awayTeam !== teamId && game.homeTeam !== teamId) return;
+      const winner = getEffectiveWinner(game);
+      if (!winner) return;
+      const opponentId = game.homeTeam === teamId ? game.awayTeam : game.homeTeam;
       const opponent = getTeamById(opponentId);
-      const teamWon = selectedPick === teamId;
-
-      if (teamWon) {
-        wins += 1;
-      } else {
-        losses += 1;
+      const isTie = winner === TIE_PICK;
+      const isWin = winner === teamId;
+      if (isTie) ties += 1;
+      else if (isWin) wins += 1;
+      else losses += 1;
+      if (opponent?.division === team?.division) {
+        if (isTie) divisionTies += 1;
+        else if (isWin) divisionWins += 1;
+        else divisionLosses += 1;
       }
-
-      if (opponent.division === team.division) {
-        if (teamWon) {
-          divisionWins += 1;
-        } else {
-          divisionLosses += 1;
-        }
-      }
-
-      if (opponent.conference === team.conference) {
-        if (teamWon) {
-          conferenceWins += 1;
-        } else {
-          conferenceLosses += 1;
-        }
+      if (opponent?.conference === team?.conference) {
+        if (isTie) conferenceTies += 1;
+        else if (isWin) conferenceWins += 1;
+        else conferenceLosses += 1;
       }
     });
-
     return {
-      wins,
-      losses,
-      divisionWins,
-      divisionLosses,
-      conferenceWins,
-      conferenceLosses,
-      winPct: getPct(wins, losses),
-      divisionPct: getPct(divisionWins, divisionLosses),
-      conferencePct: getPct(conferenceWins, conferenceLosses),
+      wins, losses, ties,
+      divisionWins, divisionLosses, divisionTies,
+      conferenceWins, conferenceLosses, conferenceTies,
+      winPct: getPct(wins, losses, ties),
+      divisionPct: getPct(divisionWins, divisionLosses, divisionTies),
+      conferencePct: getPct(conferenceWins, conferenceLosses, conferenceTies),
     };
   }
 
-  function getHeadToHeadResult(teamAId, teamBId) {
+    function getHeadToHeadResult(teamAId, teamBId) {
     let teamAWins = 0;
     let teamBWins = 0;
 
     schedule2026.forEach((game) => {
-      const selectedPick = picks[game.id];
-
-      if (!selectedPick) {
-        return;
-      }
+      const selectedPick = getEffectiveWinner(game);
+      if (!selectedPick) return;
 
       const teamsPlayed =
         (game.homeTeam === teamAId && game.awayTeam === teamBId) ||
@@ -349,6 +523,7 @@ function App() {
   }
 
   function renderTeamLogo(team, className = "team-logo-img") {
+    if (!team) return null;
     if (team.logoImage) {
       return (
         <img
@@ -366,47 +541,68 @@ function App() {
     const awayTeam = getTeamById(game.awayTeam);
     const homeTeam = getTeamById(game.homeTeam);
     const selectedPick = picks[game.id];
-
+    const disabled = isGameStarted(game);
     return (
       <div className="matchup">
-        <button
-          className={
-            selectedPick === awayTeam.id
-              ? "pick-button selected"
-              : "pick-button"
-          }
-          onClick={() => handlePick(game.id, awayTeam.id)}
-        >
+        <button className={selectedPick === awayTeam.id ? "pick-button selected" : "pick-button"}
+          disabled={disabled} onClick={() => handlePick(game.id, awayTeam.id)}>
           {renderTeamLogo(awayTeam, "small-logo-img")} {awayTeam.name}
         </button>
-
         <span className="at-symbol">{game.neutralSite ? "vs" : "@"}</span>
-
-        <button
-          className={
-            selectedPick === homeTeam.id
-              ? "pick-button selected"
-              : "pick-button"
-          }
-          onClick={() => handlePick(game.id, homeTeam.id)}
-        >
+        <button className={selectedPick === homeTeam.id ? "pick-button selected" : "pick-button"}
+          disabled={disabled} onClick={() => handlePick(game.id, homeTeam.id)}>
           {renderTeamLogo(homeTeam, "small-logo-img")} {homeTeam.name}
         </button>
+        <button className={selectedPick === TIE_PICK ? "pick-button selected tie-pick-button" : "pick-button tie-pick-button"}
+          disabled={disabled} onClick={() => handlePick(game.id, TIE_PICK)}>
+          Predict Tie
+        </button>
+      </div>
+    );
+  }
+
+  function renderLiveScore(game) {
+    const live = getLiveGame(game);
+    if (!live) return null;
+    const scoreVisible = live.state !== "pre" && Number.isFinite(live.awayScore) && Number.isFinite(live.homeScore);
+    const label = live.state === "post" ? "Final" : live.state === "in" ? "Live" : "Scheduled";
+    return (
+      <div className={`live-score-strip status-${live.state}`}>
+        <span className="score-status">{label}{live.detail ? ` · ${live.detail}` : ""}</span>
+        {scoreVisible && <strong>{live.awayTeam} {live.awayScore} — {live.homeScore} {live.homeTeam}</strong>}
       </div>
     );
   }
 
   function renderPickedText(game) {
     const selectedPick = picks[game.id];
-
+    const verdict = getPickEvaluation(game);
+    const selectedTeamName = selectedPick === TIE_PICK ? "Tie" : getTeamById(selectedPick)?.name;
+    const verdictLabels = { correct: "Correct ✓", wrong: "Incorrect ✕", push: "Tie / Push", pending: "Pending" };
     return (
       <p className="picked-text">
-        Pick: {selectedPick ? getTeamById(selectedPick).name : "No pick yet"}
+        Pick: {selectedPick ? selectedTeamName : "No pick yet"}
+        {verdict && <span className={`pick-verdict verdict-${verdict}`}> · {verdictLabels[verdict]}</span>}
+        {isGameStarted(game) && <span className="locked-note"> · Pick locked</span>}
       </p>
     );
   }
 
-  function renderDashboard() {
+  function renderScoreControls() {
+    return (
+      <div className="score-controls">
+        <span className="score-health">
+          {scoreError ? scoreError : scoreSourceReady ? "Score feed connected · auto-refreshes every 2 min live / 10 min otherwise" : "Connecting to scores…"}
+          {scoreCache.updatedAt && ` · Last checked ${new Date(scoreCache.updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+        </span>
+        <button className="score-refresh-button" onClick={refreshScores} disabled={scoreLoading}>
+          {scoreLoading ? "Loading…" : "Refresh Scores"}
+        </button>
+      </div>
+    );
+  }
+
+    function renderDashboard() {
     const afcOneSeed = afcPlayoffPicture[0];
     const nfcOneSeed = nfcPlayoffPicture[0];
     const topProjectedTeams = overallStandings.slice(0, 5);
@@ -417,8 +613,7 @@ function App() {
           <div>
             <h2>Season Dashboard</h2>
             <p>
-              Track your picks, projected records, playoff seeds, and contest
-              readiness in one place.
+              Live NFL results, your picks, projected standings and playoff outlook.
             </p>
           </div>
 
@@ -426,6 +621,8 @@ function App() {
             Make Picks
           </button>
         </div>
+
+        {renderScoreControls()}
 
         <div className="dashboard-grid">
           <div className="dashboard-card">
@@ -448,8 +645,7 @@ function App() {
             <span>Selected Team</span>
             <strong>{selectedTeam.name}</strong>
             <p>
-              Projected: {selectedTeamProjectedRecord.wins}-
-              {selectedTeamProjectedRecord.losses}
+              Actual + projected: {recordText(selectedTeamProjectedRecord)}
             </p>
           </div>
 
@@ -459,13 +655,20 @@ function App() {
               {afcOneSeed ? afcOneSeed.name : "AFC TBD"} /{" "}
               {nfcOneSeed ? nfcOneSeed.name : "NFC TBD"}
             </strong>
-            <p>Based on your projected picks</p>
+            <p>Final results + picks for unplayed games</p>
           </div>
+        </div>
+
+        <div className="dashboard-grid result-summary-grid">
+          <div className="dashboard-card"><span>Correct Picks</span><strong>{scoreCounts.correct}</strong></div>
+          <div className="dashboard-card"><span>Incorrect Picks</span><strong>{scoreCounts.wrong}</strong></div>
+          <div className="dashboard-card"><span>Tie / Push</span><strong>{scoreCounts.push}</strong></div>
+          <div className="dashboard-card"><span>Pending Picks</span><strong>{scoreCounts.pending}</strong></div>
         </div>
 
         <div className="dashboard-two-column">
           <div className="dashboard-panel">
-            <h2>Top Projected Teams</h2>
+            <h2>Season Outlook (Results + Predictions)</h2>
 
             {topProjectedTeams.map((team, index) => {
               const data = getTeamStandingData(team);
@@ -483,7 +686,7 @@ function App() {
                   <span>{renderTeamLogo(team, "small-logo-img")}</span>
                   <span>{team.name}</span>
                   <strong>
-                    {data.wins}-{data.losses}
+                    {recordText(data)}
                   </strong>
                 </button>
               );
@@ -561,101 +764,57 @@ function App() {
 
   function renderMyPicks() {
     const pickedGames = schedule2026.filter((game) => picks[game.id]);
-
-    if (pickedGames.length === 0) {
-      return (
-        <div className="summary-card">
-          <h2>My Picks</h2>
-          <p>You have not made any picks yet.</p>
-        </div>
-      );
-    }
-
-    const filteredPickedGames =
-      myPicksWeekFilter === "all"
-        ? pickedGames
-        : pickedGames.filter((game) => game.week === Number(myPicksWeekFilter));
-
-    const weeksWithPicks = [
-      ...new Set(filteredPickedGames.map((game) => game.week)),
-    ];
-
+    const filtered = myPicksWeekFilter === "all"
+      ? pickedGames
+      : pickedGames.filter((game) => game.week === Number(myPicksWeekFilter));
+    const weeks = [...new Set(filtered.map((game) => game.week))];
     return (
       <>
         <div className="my-picks-controls">
           <label htmlFor="my-picks-week-filter">Filter by week:</label>
-
-          <select
-            id="my-picks-week-filter"
-            value={myPicksWeekFilter}
-            onChange={(event) => setMyPicksWeekFilter(event.target.value)}
-          >
+          <select id="my-picks-week-filter" value={myPicksWeekFilter}
+            onChange={(event) => setMyPicksWeekFilter(event.target.value)}>
             <option value="all">All Weeks</option>
-
-            {availableWeeks.map((week) => (
-              <option key={week} value={week}>
-                Week {week}
-              </option>
-            ))}
+            {availableWeeks.map((week) => <option key={week} value={week}>Week {week}</option>)}
           </select>
         </div>
-
-        {filteredPickedGames.length === 0 ? (
-          <div className="summary-card">
-            <p>No picks found for this week yet.</p>
-          </div>
+        {!filtered.length ? (
+          <div className="summary-card"><p>{pickedGames.length ? "No picks for this week." : "You have not made any picks yet."}</p></div>
         ) : (
           <div className="my-picks-list">
-            {weeksWithPicks.map((week) => {
-              const gamesForWeek = filteredPickedGames.filter(
-                (game) => game.week === week
-              );
-
-              return (
-                <div className="my-picks-week" key={week}>
-                  <h2>Week {week}</h2>
-
-                  {gamesForWeek.map((game) => {
-                    const awayTeam = getTeamById(game.awayTeam);
-                    const homeTeam = getTeamById(game.homeTeam);
-                    const pickedTeam = getTeamById(picks[game.id]);
-
-                    return (
-                      <div className="my-pick-row" key={game.id}>
-                        <div>
-                          <strong>
-                            {renderTeamLogo(awayTeam, "small-logo-img")}{" "}
-                            {awayTeam.name} {game.neutralSite ? "vs" : "@"}{" "}
-                            {renderTeamLogo(homeTeam, "small-logo-img")}{" "}
-                            {homeTeam.name}
-                          </strong>
-
-                          <p>
-                            Week {game.week} • {game.date} • {game.time}
-                            {game.network ? ` • ${game.network}` : ""}
-                            {game.neutralSite && game.location
-                              ? ` • ${game.location}`
-                              : ""}
-                          </p>
-                        </div>
-
-                        <div className="my-pick-winner">
-                          Pick: {renderTeamLogo(pickedTeam, "small-logo-img")}{" "}
-                          {pickedTeam.name}
-                        </div>
+            {weeks.map((week) => (
+              <div className="my-picks-week" key={week}>
+                <h2>Week {week}</h2>
+                {filtered.filter((game) => game.week === week).map((game) => {
+                  const away = getTeamById(game.awayTeam);
+                  const home = getTeamById(game.homeTeam);
+                  const choice = picks[game.id];
+                  const pickName = choice === TIE_PICK ? "Tie" : getTeamById(choice)?.name;
+                  const verdict = getPickEvaluation(game);
+                  const labels = { correct: "Correct", wrong: "Incorrect", push: "Tie / Push", pending: "Pending" };
+                  return (
+                    <div className="my-pick-row" key={game.id}>
+                      <div>
+                        <strong>{renderTeamLogo(away, "small-logo-img")} {away.name} {game.neutralSite ? "vs" : "@"} {renderTeamLogo(home, "small-logo-img")} {home.name}</strong>
+                        <p>Week {game.week} · {game.date} · {game.time}</p>
+                        {renderLiveScore(game)}
                       </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
+                      <div className="my-pick-winner">
+                        Pick: {pickName}
+                        <span className={`pick-verdict verdict-${verdict}`}> · {labels[verdict]}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         )}
       </>
     );
   }
 
-  function renderPickSummary() {
+    function renderPickSummary() {
     return (
       <div className="summary-card">
         <h2>Pick Summary</h2>
@@ -664,10 +823,8 @@ function App() {
           Total Games Picked: {totalPickedGames} / {totalGames}
         </p>
 
-        <p>
-          Week {selectedWeek} Picks: {selectedWeekPickedGames} /{" "}
-          {selectedWeekGames.length}
-        </p>
+        <p>Week {selectedWeek} Picks: {selectedWeekPickedGames} / {selectedWeekGames.length}</p>
+        <p>Correct: {scoreCounts.correct} · Incorrect: {scoreCounts.wrong} · Pushes: {scoreCounts.push}</p>
       </div>
     );
   }
@@ -707,8 +864,7 @@ function App() {
             </p>
 
             <p>
-              Projected Record: {selectedTeamProjectedRecord.wins}-
-              {selectedTeamProjectedRecord.losses}
+              Season Outlook: {recordText(selectedTeamProjectedRecord)}
             </p>
 
             <p>
@@ -730,49 +886,29 @@ function App() {
       <section className="picks-column">
         <div className="week-header">
           <h2>Week {selectedWeek} Picks</h2>
-
-          <select
-            value={selectedWeek}
-            onChange={(event) => setSelectedWeek(Number(event.target.value))}
-          >
-            {availableWeeks.map((week) => (
-              <option key={week} value={week}>
-                Week {week}
-              </option>
-            ))}
+          <select value={selectedWeek}
+            onChange={(event) => setSelectedWeek(Number(event.target.value))}>
+            {availableWeeks.map((week) => <option key={week} value={week}>Week {week}</option>)}
           </select>
-
           <div className="week-action-buttons">
-            <button className="clear-button" onClick={clearSelectedWeekPicks}>
-              Clear Week {selectedWeek}
-            </button>
-
-            <button className="clear-button danger" onClick={clearPicks}>
-              Clear All Picks
-            </button>
+            <button className="sim-button" onClick={() => simulateRemaining("week")}>Sim Remaining Week {selectedWeek}</button>
+            <button className="clear-button" onClick={clearSelectedWeekPicks}>Clear Week {selectedWeek}</button>
+            <button className="sim-button" onClick={() => simulateRemaining("season")}>Sim Rest of Season</button>
+            <button className="clear-button danger" onClick={clearPicks}>Clear Unlocked Picks</button>
           </div>
         </div>
-
+        <p className="game-details">Simulator preserves manual picks and skips games that already started. Picks lock at kickoff.</p>
+        {renderScoreControls()}
         <div className="pick-list">
           {selectedWeekGames.map((game) => (
             <div className="pick-game-card" key={game.id}>
               <div>
                 <strong>Week {game.week}</strong>
-
-                <p>
-                  {game.date} - {game.time}
-                </p>
-
-                <p className="game-details">
-                  {game.network}
-                  {game.neutralSite && game.location
-                    ? ` • ${game.location}`
-                    : ""}
-                </p>
+                <p>{game.date} - {game.time}</p>
+                <p className="game-details">{game.network}{game.neutralSite && game.location ? ` · ${game.location}` : ""}</p>
               </div>
-
+              {renderLiveScore(game)}
               {renderPickButtons(game)}
-
               {renderPickedText(game)}
             </div>
           ))}
@@ -781,7 +917,7 @@ function App() {
     );
   }
 
-  function renderSelectedTeamSchedule() {
+    function renderSelectedTeamSchedule() {
     return (
       <section className="picks-column">
         <h2>{selectedTeam.name} Schedule Picks</h2>
@@ -804,6 +940,7 @@ function App() {
                 </p>
               </div>
 
+              {renderLiveScore(game)}
               {renderPickButtons(game)}
 
               {renderPickedText(game)}
@@ -850,13 +987,13 @@ function App() {
               </span>
 
               <span>
-                {data.wins}-{data.losses}
+                {recordText(data)}
               </span>
 
               <span>
                 {recordType === "division"
-                  ? `${data.divisionWins}-${data.divisionLosses}`
-                  : `${data.conferenceWins}-${data.conferenceLosses}`}
+                  ? `${data.divisionWins}-${data.divisionLosses}-${data.divisionTies}`
+                  : `${data.conferenceWins}-${data.conferenceLosses}-${data.conferenceTies}`}
               </span>
             </div>
           );
@@ -894,8 +1031,7 @@ function App() {
                 </p>
 
                 <p>
-                  Projected Record: {teamProjectedRecord.wins}-
-                  {teamProjectedRecord.losses}
+                  Season Outlook: {recordText(teamProjectedRecord)}
                 </p>
               </div>
             );
@@ -999,7 +1135,7 @@ function App() {
 
       {activeTab === "standings" && (
         <>
-          <h2>Division Standings</h2>
+          <h2>Division Standings (Final Results + Remaining Picks)</h2>
 
           <div className="division-standings-grid">
             {divisionStandings.map((divisionGroup) => (
@@ -1032,11 +1168,11 @@ function App() {
                       </span>
 
                       <span>
-                        {data.wins}-{data.losses}
+                        {recordText(data)}
                       </span>
 
                       <span>
-                        {data.divisionWins}-{data.divisionLosses}
+                        {data.divisionWins}-{data.divisionLosses}-{data.divisionTies}
                       </span>
                     </div>
                   );
@@ -1055,7 +1191,7 @@ function App() {
 
       {activeTab === "playoffs" && (
         <>
-          <h2>Projected Playoff Picture</h2>
+          <h2>Projected Playoff Picture (Final Results + Remaining Picks)</h2>
 
           <div className="playoff-picture">
             {renderStandingsTable(

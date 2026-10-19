@@ -799,3 +799,62 @@ body {
     max-width: none;
   }
 }
+
+/* Live scores, tied games and protected simulation controls */
+.score-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 14px;
+  margin: 16px 0;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #0f172a;
+}
+.score-health { color: #cbd5e1; font-size: 14px; flex: 1; }
+.score-refresh-button, .sim-button {
+  background: #1d4ed8;
+  color: white;
+  border: 1px solid #60a5fa;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 15px;
+}
+.sim-button { background: #0f766e; border-color: #2dd4bf; }
+.score-refresh-button:hover { background: #2563eb; }
+.sim-button:hover { background: #115e59; }
+.score-refresh-button:disabled { opacity: .65; cursor: wait; }
+.pick-button:disabled { opacity: .7; cursor: not-allowed; transform: none; }
+.pick-button.selected:disabled { opacity: 1; }
+.tie-pick-button { border-style: dashed; }
+.live-score-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  color: #e2e8f0;
+}
+.status-in { border-color: #f59e0b; }
+.status-post { border-color: #64748b; }
+.status-in .score-status { color: #fbbf24; font-weight: 700; }
+.score-status { font-size: 14px; }
+.pick-verdict { font-weight: 600; }
+.verdict-correct { color: #4ade80; }
+.verdict-wrong { color: #f87171; }
+.verdict-push { color: #facc15; }
+.verdict-pending, .locked-note { color: #94a3b8; }
+.result-summary-grid .dashboard-card strong { font-size: 25px; }
+@media (max-width: 700px) {
+  .week-action-buttons .sim-button { width: 100%; }
+  .score-refresh-button { width: 100%; }
+  .live-score-strip { align-items: flex-start; }
+}
